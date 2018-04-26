@@ -199,7 +199,6 @@ void ouch(int sig)
 	
 	key = ftok("/home", 1);				//创建键值
 	semid = semget(key, 1, IPC_CREAT);	//创建信号量
-	semctl(semid, 0, SETVAL, 0);		//设置信号量初始值
 	
 	//获取信号量
 	sops.sem_num = 0;
