@@ -84,14 +84,14 @@ int main()
 			cur = 0;
 		}
 		printf("cur : %d\n", cur);
-		
-		//处理外部信号
-		signal(SIGINT, ouch);
 						
 		//释放信号量
 		sops.sem_num = 0;
 		sops.sem_op  = 1;
 		semop(semid, &sops, 1);
+		
+		//处理外部信号
+		signal(SIGINT, ouch);
 	}
 }
 
