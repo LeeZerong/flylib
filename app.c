@@ -38,6 +38,8 @@ int main()
 	
 	while(1)
 	{
+		
+		
 		//清空数据存取空间
 		memset(data, 0, D_SIZE + 1);
 		
@@ -126,7 +128,7 @@ int write_file(char *wbuf)
 	{
 		perror("open file error");
 		err = -1;
-		return err;
+		goto end;
 	}
 	
 	//读取配置文件
