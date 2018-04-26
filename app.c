@@ -3,6 +3,8 @@
 #include <sys/klog.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/sem.h>
+#include <sys/ipc.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
@@ -12,8 +14,8 @@
 #define B_SIZE 1024
 #define F_SIZE 1024*10
 
-void read_data(char *data, int *len);	//从环形缓冲区中获取数据
-void write_file(char *buf);				//将缓冲区的数据写入磁盘
+int  read_data(char *data, int *len);	//从环形缓冲区中获取数据
+int  write_file(char *buf);				//将缓冲区的数据写入磁盘
 void ouch(int sig);						//信号处理函数
 
 char buf[B_SIZE+1] = {0};	//缓冲区
@@ -23,13 +25,16 @@ int main()
 	int len = 0;	//获取到的数据长度
 	int cur = 0;	//指针的当前位置
 	int n = 0;		//缓冲区所剩空间与数据长度的差值
-	char *data = (char *)malloc(D_SIZE + 1);	//数据
+	char data[D_SIZE+1] = {0};	//数据
+	int res;
 	
-	if(data == NULL)
-	{
-		printf("malloc error!\n");
-		return -1;
-	}
+	int semid;
+	struct sembuf sops;
+	key_t key;
+	
+	key = ftok("/home", 1);				//创建键值
+	semid = semget(key, 1, IPC_CREAT);	//创建信号量
+	semctl(semid, 0, SETVAL, 0);		//设置信号量初始值
 	
 	while(1)
 	{
@@ -37,7 +42,11 @@ int main()
 		memset(data, 0, D_SIZE + 1);
 		
 		//从环形缓冲区中获取数据
-		read_data(data, &len);
+		if(0 > (res = read_data(data, &len)))
+		{
+			printf("read_data error!\n");
+			return -1;
+		}
 		
 		//缓冲区未满，且有足够空间存放整个数组
 		if(cur + len <= B_SIZE)
@@ -78,28 +87,31 @@ int main()
 		
 		//处理外部信号
 		signal(SIGINT, ouch);
+						
+		//释放信号量
+		sops.sem_num = 0;
+		sops.sem_op  = 1;
+		semop(semid, &sops, 1);
 	}
-
-	free(data);
 }
 
-void read_data(char *data, int *len)
+int read_data(char *data, int *len)
 {
 	if(data == NULL)
 	{
 		printf("data erroc!\n");
-		return;
+		return -1;
 	}
 		
 	
 	if(0 > (*len = klogctl(2, data, D_SIZE)))
 	{
 		perror("klogctl error");
-		return;
+		return -2;
 	}	
 }
 
-void write_file(char *wbuf)
+int write_file(char *wbuf)
 {
 	int n = 0;				//文件所剩空间与缓冲区大小的差值
 	char info[50] = {0};	//配置文件的信息
@@ -107,12 +119,14 @@ void write_file(char *wbuf)
 	int len = strlen(wbuf);	//写入数据的长度
 	int fd = open("./log.txt", O_RDWR | O_CREAT, 0777);
 	int fd_info = open("./info.txt", O_RDWR | O_CREAT, 0777);
+	int err = 0;
 	
 	//打开文件
 	if(fd < 0 || fd_info < 0)
 	{
 		perror("open file error");
-		return;
+		err = -1;
+		return err;
 	}
 	
 	//读取配置文件
@@ -127,7 +141,8 @@ void write_file(char *wbuf)
 		if(0 > write(fd, wbuf, len))
 		{
 			perror("write file error");
-			return;
+			err = -1;
+			goto end;
 		}
 	}else{	//还未达到文件的限定大小
 		//移动文件指针
@@ -140,7 +155,8 @@ void write_file(char *wbuf)
 			if(0 > write(fd, wbuf, len))
 			{
 				perror("write file error");
-				return;
+				err = -1;
+				goto end;
 			}
 		}
 		else
@@ -149,13 +165,15 @@ void write_file(char *wbuf)
 			if(0 > write(fd, wbuf, len-n))
 			{
 				perror("write file error");
-				return;
+				err = -1;
+				goto end;
 			}
 			lseek(fd, 0, SEEK_SET);
 			if(0 > write(fd, &(wbuf[len-n]), n))
 			{
 				perror("write file error");
-				return;
+				err = -1;
+				goto end;
 			}
 		}
 	}
@@ -166,13 +184,31 @@ void write_file(char *wbuf)
 	sprintf(info,  "the file port in %d", offset);
 	write(fd_info, info, 50);
 	
+end:
 	close(fd_info);
 	close(fd);
+	return err;
 }
 
 void ouch(int sig) 
 { 
-	printf("\n get signal %d\n", sig); 
-	write_file(buf);
+	int semid;
+	struct sembuf sops;
+	key_t key;
+	char wbuf[B_SIZE+1] = {0};
+	
+	key = ftok("/home", 1);				//创建键值
+	semid = semget(key, 1, IPC_CREAT);	//创建信号量
+	semctl(semid, 0, SETVAL, 0);		//设置信号量初始值
+	
+	//获取信号量
+	sops.sem_num = 0;
+	sops.sem_op  = -1;
+	sops.sem_flg = SEM_UNDO;
+	semop(semid, &sops, 1);
+	
+	strncpy(wbuf, buf, B_SIZE+1);
+	printf("\n get signal %d, write file!\n", sig); 
+	write_file(wbuf);
 } 
 
